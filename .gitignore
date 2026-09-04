@@ -17,3 +17,5 @@ presentacion/ReporteVideo/**/discovery/
 presentacion/ReporteVideo/**/Discovery-*.md
 presentacion/ReporteVideo/**/CapsulaExtensa-*.md
 presentacion/ReporteVideo/**/Capsula-*.md
+presentacion/ReporteVideo/**/_registro_capsulas.json
+presentacion/ReporteVideo/**/_verificacion_manifiesto.json

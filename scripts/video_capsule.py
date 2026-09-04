@@ -40,6 +40,7 @@ from narration import Narrator
 import capsule_content
 import reel_themes
 import reel_discovery
+import capsule_registry
 
 # Windows suele mostrar cp1252 por consola; forzar UTF-8 evita romper con acentos.
 try:
@@ -1281,6 +1282,9 @@ def main() -> int:
                     help="Imagen FIJA por momento (sin zoom ni paneo Ken Burns): mantiene el foco")
     ap.add_argument("--script-file", type=str,
                     help="Archivo UTF-8 con la narracion continua (evita problemas de acentos por consola)")
+    ap.add_argument("--force", "--reprocess", dest="force", action="store_true",
+                    help="(modo capsula) reprocesa aunque el video ya este EXACT_DUPLICATE en memoria "
+                         "(identidad por SHA-256, ver capsule_registry.identify_video)")
     args = ap.parse_args()
 
     paths = ProjectPaths()
@@ -1333,6 +1337,30 @@ def main() -> int:
                      f"largo en {capsula_dir} (o pasa --video <ruta> solo para probar).")
         return 1
     logger.info(f"Video: {video.name}")
+
+    # Identidad + memoria (misma doctrina que /videoE2EUseCaseAnalyzer, seccion 33-34):
+    # antes de reprocesar un video ENTERO (modo capsula, auto), consulta si ya se
+    # proceso EXACTAMENTE el mismo archivo (SHA-256) y ya tiene capsulas generadas.
+    # No aplica a --at (curacion manual explicita) ni a --video de prueba.
+    if is_reel and not args.at and not args.force:
+        try:
+            ident = capsule_registry.identify_video(video)
+        except Exception as e:
+            ident = None
+            logger.warning(f"No se pudo verificar identidad del video ({e}); se continua.")
+        if ident and ident["status"] == "EXACT_DUPLICATE" and ident["match"].get("capsulas"):
+            m = ident["match"]
+            logger.section("VIDEO YA PROCESADO")
+            logger.info(f"Video ID: {ident['video_id']}")
+            logger.info(f"Registrado: {m.get('registrado', '?')} · Actualizado: {m.get('actualizado', '?')}")
+            logger.info(f"Capsulas ya generadas: {', '.join(m.get('capsulas', [])) or '(ninguna)'}")
+            logger.info(f"Objetivo (temas cubiertos): {', '.join(m.get('objetivo', [])) or '-'}")
+            logger.warning("No se reprocesa (mismo archivo exacto, SHA-256 identico). "
+                           "Usa --force para forzar el reprocesamiento.")
+            return 0
+        if ident and ident["status"] == "NEW_VERSION":
+            logger.info(f"Video detectado como NUEVA VERSION de '{ident['match'].get('video')}' "
+                        f"(misma familia de nombre, duracion distinta); se procesa completo.")
 
     month = datetime.strptime(date_string, "%Y-%m-%d").strftime("%m-%Y")
     out_dir = paths.presentacion / "ReporteVideo" / month / ("capsula-extensa" if is_reel else "screenShot")

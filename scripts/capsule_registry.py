@@ -24,6 +24,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 
+from video_use_case_memory import file_hash, family_name, probe_duration
+
 ROOT = Path(__file__).resolve().parent.parent
 # Carpeta del mes vigente (o CAPSULA_MES="MM-AAAA" para apuntar a otro mes/proyecto).
 import os as _os
@@ -269,6 +271,36 @@ def _caps_for_video(src_stem: str, reg: Dict, all_stems: List[str]) -> List[str]
     return caps
 
 
+def identify_video(path: Path) -> Dict:
+    """Identidad del video contra 'videos_procesados' (misma doctrina de
+    video_use_case_memory.classify_video: SHA-256 como identificador principal, no
+    solo el nombre de archivo). -> EXACT_DUPLICATE / LIKELY_DUPLICATE / NEW_VERSION /
+    NEW_VIDEO, con el registro que ya se proceso (si corresponde)."""
+    reg = load_registry()
+    procesados = reg.get("videos_procesados", [])
+    vid = file_hash(path)
+    duration = probe_duration(path)
+    fam = family_name(path.name)
+
+    exact = next((v for v in procesados if v.get("video_id") == vid), None)
+    if exact is not None:
+        return {"status": "EXACT_DUPLICATE", "video_id": vid, "duration_seconds": duration,
+                "match": exact}
+
+    same_family = [v for v in procesados if fam and family_name(v.get("video", "")) == fam]
+    if same_family:
+        close = [v for v in same_family
+                if duration and v.get("duration_seconds")
+                and abs(v["duration_seconds"] - duration) / max(v["duration_seconds"], 1) <= 0.02]
+        if close:
+            return {"status": "LIKELY_DUPLICATE", "video_id": vid, "duration_seconds": duration,
+                    "match": close[0], "family": fam}
+        return {"status": "NEW_VERSION", "video_id": vid, "duration_seconds": duration,
+                "match": same_family[-1], "family": fam}
+
+    return {"status": "NEW_VIDEO", "video_id": vid, "duration_seconds": duration, "family": fam}
+
+
 def build_video_report() -> List[Dict]:
     """Objetivo + estado por cada video en capsula/ (para registrar y decidir limpieza)."""
     reg = _sync_from_outputs(load_registry())
@@ -297,6 +329,8 @@ def build_video_report() -> List[Dict]:
         procesado = (md is not None) or bool(caps)
         report.append({
             "video": src.name,
+            "video_id": file_hash(src),
+            "duration_seconds": probe_duration(src),
             "discovery": md.parent.name if md else None,
             "objetivo": sorted(set(t for t in temas if t)),
             "capsulas": caps,
@@ -423,6 +457,8 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("more-cases", help="Reporta candidatos nuevos no duplicados")
     sub.add_parser("list", help="Lista capsulas producidas")
+    idf = sub.add_parser("identify", help="Identidad del video (SHA-256) y estado de duplicado/version")
+    idf.add_argument("--video", type=str, required=True, help="Ruta del video a identificar")
     sub.add_parser("record-videos", help="Registra el objetivo de cada video procesado (durable)")
     sub.add_parser("deletable", help="Lista videos aptos para eliminar (sin casos nuevos)")
     dv = sub.add_parser("delete-video", help="Elimina un mp4 procesado sin casos nuevos (conserva registro)")
@@ -439,6 +475,9 @@ def main() -> int:
         return more_cases()
     if args.cmd == "list":
         return list_caps(args)
+    if args.cmd == "identify":
+        print(json.dumps(identify_video(Path(args.video)), ensure_ascii=False, indent=2))
+        return 0
     if args.cmd == "record-videos":
         return record_videos(args)
     if args.cmd == "deletable":

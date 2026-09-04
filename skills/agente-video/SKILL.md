@@ -206,6 +206,7 @@ python scripts/video_capsule.py --date <hoy | DD-MM-AAAA>
 | `--ordered` | Respeta el **orden** de `--at` (narrativo; p.ej. abrir con el Q&A) | cronológico |
 | `--voice` | Voz latina: alias `mx`/`mx-m`/`co`/`co-m`/`cl`/`cl-m`/`us`… | usar **`mx-m`** (masculina) |
 | `--theme "<txt>"` | Subtítulo de la portada | — |
+| `--force` / `--reprocess` | Reprocesa aunque el video sea `EXACT_DUPLICATE` en memoria (sección 0) | off |
 | `--clip-seconds` | Duración de cada momento (se autoajusta al guion con `--script`) | `5` |
 | `--mute-original` | Silencia el audio original (implícito con `--script`) | — |
 | `--out` | Ruta `.mp4` de salida | auto |
@@ -239,6 +240,22 @@ entregadas con este método). Incorpora buenas prácticas de **ECC** (verificati
 delivery-gate, continuous-learning) y del curso **ai-agents-for-beginners** de Microsoft
 (07-planning-design, 09-metacognition, 13-agent-memory).
 
+### 0. Identidad del video (anti-reprocesamiento, misma doctrina del `/videoE2EUseCaseAnalyzer`)
+Antes de correr el discovery completo (modo `capsula`, automático), se identifica el
+video por **SHA-256** (no por nombre de archivo, que puede cambiar) contra
+`videos_procesados` del registro:
+```powershell
+.venv\Scripts\python.exe scripts\capsule_registry.py identify --video "capsula\<archivo>.mp4"
+```
+- `EXACT_DUPLICATE` (mismo hash, con cápsulas ya generadas) → `video_capsule.py` **no
+  reprocesa**: informa "VIDEO YA PROCESADO" (video ID, cápsulas existentes, objetivo
+  cubierto) y termina. Usa `--force` para forzar el reprocesamiento igual.
+- `NEW_VERSION` (misma familia de nombre — `v1`/`v2`/`final`/... —, duración distinta)
+  → se procesa completo, mencionando de qué video es nueva versión.
+- El chequeo se **omite** si pasas `--at` (curación manual explícita) o `--force`.
+- Requiere haber corrido `record-videos` al menos una vez (persiste `video_id` +
+  `duration_seconds` por video); `more-cases` también lo hace al final de cada lote.
+
 ### 1. Flujo grounded (aterrizado en el contenido real)
 1. **Discovery de audio** — `reel_discovery.deep_discovery` transcribe (Whisper, cacheado)
    y escribe entregables `01`–`04` en `discovery/<slug>/`.
@@ -267,8 +284,10 @@ Cruza el **registro** (`capsula-extensa/_registro_capsulas.json`, idempotencia e
 continuous-learning) con el discovery de cada video en `capsula/` y reporta **candidatos
 NUEVOS no duplicados** (un tema canónico cubierto por cualquier cápsula no se repite,
 aunque aparezca en otro video). `record` registra una cápsula; `list` lista; `record-videos`
-persiste el **objetivo por video procesado**; `deletable` lista los videos sin casos nuevos;
-`delete-video --name <mp4> --yes` borra un mp4 procesado (guardado, ver sección 6).
+persiste el **objetivo por video procesado** (incluye `video_id` SHA-256 y duración, usados
+por `identify`/el chequeo anti-reprocesamiento de la sección 0); `deletable` lista los
+videos sin casos nuevos; `delete-video --name <mp4> --yes` borra un mp4 procesado
+(guardado, ver sección 6).
 
 ### 4. Compuerta de verificación (gate) — patrón ECC verification-loop
 Fases **mecánicas** (BLOQUEA solo en hechos verificables; nunca inferencia de IA):
