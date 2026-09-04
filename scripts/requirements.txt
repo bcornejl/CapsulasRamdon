@@ -1,0 +1,39 @@
+# ============================================================================
+# requirements.txt - Dependencias para Célula Agéntica
+# ============================================================================
+
+# Transcripción de audio (Whisper)
+faster-whisper>=0.10.0
+
+# Decodificación de video/audio (frames, duración)
+av>=11.0
+
+# SSL corporativo: usa el almacén de certificados del sistema (proxy/inspección SSL)
+truststore>=0.9
+
+# Captura visual: guardar frames + OCR (modelos ONNX incluidos, sin binarios externos)
+pillow>=10.0
+rapidocr-onnxruntime>=1.3
+
+# Presentación PPTX de estado de avance (rellena la plantilla con capturas del HTML)
+python-pptx>=1.0
+# Captura headless del HTML para la PPTX. capture_daily.py usa el Edge del sistema
+# (channel msedge) por defecto: NO requiere descargar navegadores en Windows.
+# El Chromium de Playwright es OPCIONAL (fallback). Para instalarlo pese al SSL:
+#   $env:NODE_TLS_REJECT_UNAUTHORIZED="0"; playwright install chromium
+playwright>=1.40
+
+# Cálculo (firmas de escena, agregaciones)
+numpy>=1.24
+
+# Voz en off (TTS) en español latino para /agenteVideo:
+# edge-tts = voces neurales (requiere red; SSL corporativo resuelto con truststore).
+# pyttsx3  = voz local SAPI5 de respaldo (offline) si no hay red.
+edge-tts>=7.0
+pyttsx3>=2.90
+
+# Consola con color / logging
+colorama>=0.4.6
+
+# Opcional (mejor precisión de sentimiento en español, instalación pesada):
+# pysentimiento>=0.7   # requiere torch + transformers + descarga de modelos

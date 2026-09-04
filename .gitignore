@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+scheduler.log
+output/
+capsula/*.mp4
+capsula/*.mkv
+capsula/*.mov
+capsula/*.avi
+capsula/*.m4v
+capsula/*.webm
+presentacion/ReporteVideo/**/*.mp4
+presentacion/ReporteVideo/**/_progreso-*.log
