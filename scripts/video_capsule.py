@@ -1104,35 +1104,65 @@ def _step_caption(step, reel_theme=None, max_len: int = 64) -> str:
                    else ARTIFACT_CAPTION["otro"])
 
 
-def _walkthrough_script(flow, lo: float, hi: float, max_steps: int = 14) -> str:
-    """Narracion PASO A PASO de la demo: que se hace en cada pantalla, en orden.
+def _walkthrough_script(flow, lo: float, hi: float, max_steps: int = 16) -> str:
+    """Narracion PASO A PASO en lenguaje PROFESIONAL y NATURAL.
 
-    Es lo que convierte la capsula en material de aprendizaje: describe la opcion
-    usada y la accion aunque en el video nadie hable. Evita repetir la misma frase
-    dos veces seguidas (pasos consecutivos con la misma pantalla y accion)."""
+    Reglas para que suene bien en una presentacion al banco:
+      - Nunca se lee texto crudo de OCR ni de la transcripcion.
+      - Los pasos consecutivos equivalentes se AGRUPAN (no se repite la misma frase).
+      - Conectores variados y frases completas, sin enumeracion mecanica.
+    """
     if not flow:
         return ""
     steps = flow_steps.steps_in_range(flow, lo, hi, min_dur=2.0)
     if not steps:
         return ""
-    if len(steps) > max_steps:                     # reparto parejo, sin perder el arco
-        k = len(steps) / float(max_steps)
-        steps = [steps[min(len(steps) - 1, int(i * k))] for i in range(max_steps)]
-    frases, prev = [], None
+
+    # Agrupar pasos consecutivos equivalentes: el mismo trabajo continuado se narra
+    # una sola vez (leer diez veces "se aplican filtros" suena a error, no a guion).
+    bloques, ultima = [], None
     for st in steps:
-        key = (st.screen, st.action)
-        if key == prev:
+        clave = (st.action, st.screen)
+        if clave == ultima:
             continue
-        prev = key
-        frases.append(st.narration())
-    if not frases:
-        return ""
-    ordinales = ["Primero,", "Luego,", "Después,", "A continuación,", "Enseguida,",
-                 "Más adelante,", "Después de eso,", "Acto seguido,"]
-    salida = []
-    for i, f in enumerate(frases):
-        pref = ordinales[i] if i < len(ordinales) else "Y luego,"
-        salida.append(f"{pref} {f[0].lower()}{f[1:]}")
+        ultima = clave
+        bloques.append(st)
+
+    if len(bloques) > max_steps:
+        # Priorizar los pasos con accion ESPECIFICA (crear, filtrar, desplegar,
+        # escribir…) sobre los genericos ("se revisa el detalle"): un guion hecho de
+        # frases genericas no ensena nada. Se conserva el orden cronologico.
+        GENERICAS = {"revisar", "interactuar", "cambiar"}
+        especificos = [b for b in bloques if b.action not in GENERICAS]
+        base = especificos if len(especificos) >= max(3, max_steps // 2) else bloques
+        # Diversidad: como maximo 3 pasos del mismo tipo de accion, priorizando los
+        # que traen nombre de pantalla (aportan mas informacion al que aprende).
+        por_accion: Dict[str, int] = {}
+        diverso = []
+        for st in sorted(base, key=lambda s: (0 if s.screen else 1, s.start)):
+            n = por_accion.get(st.action, 0)
+            if n >= 4:
+                continue
+            por_accion[st.action] = n + 1
+            diverso.append(st)
+        base = sorted(diverso, key=lambda s: s.start)
+        if len(base) > max_steps:
+            k = len(base) / float(max_steps)
+            base = [base[min(len(base) - 1, int(i * k))] for i in range(max_steps)]
+        bloques = base
+
+    conectores = ["Para comenzar", "A continuación", "Luego", "Enseguida", "Después",
+                  "Más adelante", "En el siguiente paso", "Posteriormente",
+                  "Acto seguido", "Hecho esto", "Ya con eso resuelto", "Siguiendo el flujo",
+                  "En esta etapa", "Una vez confirmado", "Con la información cargada"]
+    salida, usos = [], {}
+    for i, st in enumerate(bloques):
+        rep = usos.get(st.action, 0)
+        usos[st.action] = rep + 1
+        con = conectores[i] if i < len(conectores) else "Después"
+        if i == len(bloques) - 1 and len(bloques) > 1:
+            con = "Para cerrar el procedimiento"
+        salida.append(f"{con}, {st.narration(rep)}.")
     return " ".join(salida)
 
 
@@ -1179,15 +1209,16 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
     if voice_only:
         renderer.mute_original = True
         script_text = getattr(args, "script", None)
+        walk = _walkthrough_script(getattr(args, "_flow_steps", None), lo, hi)
         if not script_text and reel_theme is not None:
-            script_text = reel_theme.script
+            # El recorrido paso a paso va DENTRO del guion (no pegado al final),
+            # para que la narracion fluya como una explicacion continua.
+            script_text = (reel_theme.script_with(walk)
+                           if hasattr(reel_theme, "script_with") else reel_theme.script)
         if not script_text:
             script_text = " ".join(p for p in (hook_text, pt(0), pt(1), pt(2), outro_text) if p)
-        # PASO A PASO NARRADO: la capsula es de APRENDIZAJE, asi que la voz IA describe
-        # cada paso real de la demo (opcion usada + accion), incluso donde nadie habla.
-        walk = _walkthrough_script(getattr(args, "_flow_steps", None), lo, hi)
-        if walk:
-            script_text = f"{script_text} Veámoslo paso a paso. {walk}"
+            if walk:
+                script_text = f"{script_text} {walk}"
         full_narr = synth(script_text, "script")
         if full_narr is not None:
             pk = float(np.max(np.abs(full_narr))) or 1.0
@@ -1223,7 +1254,9 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         # solaparse. Cada paso se muestra completo (hasta que la pantalla cambia),
         # y los tramos de espera ya vienen descartados por flow_steps.
         narr_s = full_narr.shape[1] / renderer.rate
-        budget_s = min(max(narr_s + 1.0 - card_time, 30.0),
+        # Piso = la duracion minima pedida (--min-seconds): un guion conciso no debe
+        # dejar la capsula en 60 segundos cuando se pidio recorrer el proceso completo.
+        budget_s = min(max(narr_s + 1.0 - card_time, args.min_seconds - card_time),
                        max(1.0, args.max_seconds - card_time))
         pool = flow_steps.steps_in_range(flow, lo, hi, min_dur=1.5)
         if not pool:                       # el tema no cae sobre pasos utiles: usa todo

@@ -494,6 +494,15 @@ class GroundedTheme:
     que_hace: str = ""
     proposito: str = ""
     resultado: str = ""
+    _intro: str = ""
+    _cierre: str = ""
+
+    def script_with(self, walkthrough: str = "") -> str:
+        """Guion completo con el recorrido paso a paso INSERTADO en el medio, para que
+        la voz suene como una explicacion continua y no como dos textos pegados."""
+        if not walkthrough or not self._intro:
+            return self.script
+        return f"{self._intro} {walkthrough} {self._cierre}".strip()
 
     def act_caption(self, act: int) -> str:
         act = max(0, min(2, act))
@@ -515,29 +524,85 @@ def _case_quotes(case: Dict, tagged: List[Dict], max_quotes: int = 6) -> List[st
     return out
 
 
-def _grounded_theme(case: Dict, quotes: List[str]) -> GroundedTheme:
-    """Guion HONESTO: contexto + intencion/pregunta reales + citas literales del
-    tramo. No fabrica proposito/resultado que el audio no explique."""
+# Como se nombra cada tema en una narracion PROFESIONAL (no el slug tecnico crudo).
+TOPIC_SPOKEN: Dict[str, Dict[str, str]] = {
+    "Visualizador / Front": {
+        "nombre": "la construcción de la interfaz de usuario",
+        "que": "el equipo construye y revisa la capa visual con la que interactúa el usuario final",
+        "valor": "acorta el tiempo entre una definición funcional y una pantalla operativa que el negocio puede validar",
+    },
+    "API / Mesa": {
+        "nombre": "la construcción y publicación de servicios",
+        "que": "el equipo define, construye y publica los servicios que exponen la funcionalidad al resto de la organización",
+        "valor": "asegura que cada servicio quede documentado, estandarizado y disponible para ser reutilizado",
+    },
+    "MCP / Integración": {
+        "nombre": "la integración entre sistemas",
+        "que": "el equipo conecta los distintos componentes para que la información fluya de extremo a extremo",
+        "valor": "evita el trabajo manual entre plataformas y reduce los puntos de falla de la operación",
+    },
+    "CI/CD": {
+        "nombre": "la integración y el despliegue continuo",
+        "que": "el equipo automatiza la construcción y la puesta en marcha de la aplicación",
+        "valor": "permite liberar cambios de forma frecuente, controlada y con trazabilidad",
+    },
+    "QA / Pruebas": {
+        "nombre": "el aseguramiento de la calidad",
+        "que": "el equipo verifica el comportamiento de la solución antes de ponerla en producción",
+        "valor": "reduce los incidentes en producción y protege la experiencia del cliente",
+    },
+    "Jira / HDU": {
+        "nombre": "la gestión del trabajo y las historias de usuario",
+        "que": "el equipo organiza y refina el trabajo pendiente con trazabilidad",
+        "valor": "da visibilidad del avance real y previsibilidad a los compromisos",
+    },
+    "Código / PR": {
+        "nombre": "el desarrollo y la revisión del código",
+        "que": "el equipo escribe el código y lo somete a revisión antes de integrarlo",
+        "valor": "mantiene la calidad técnica y el control sobre lo que llega al producto",
+    },
+    "Agente / Framework": {
+        "nombre": "el uso del framework agéntico",
+        "que": "el equipo apoya su trabajo en agentes que ejecutan tareas bajo su supervisión",
+        "valor": "amplifica la capacidad del equipo sin ceder el control de las decisiones",
+    },
+}
+
+
+def _topic_profile(topic: str) -> Dict[str, str]:
+    """Descripcion profesional del tema; si es desconocido, una version neutra y correcta."""
+    if topic in TOPIC_SPOKEN:
+        return TOPIC_SPOKEN[topic]
+    limpio = re.sub(r"\s*/\s*", " y ", topic).strip().lower()
+    return {
+        "nombre": limpio,
+        "que": f"el equipo trabaja sobre {limpio} dentro del proceso de desarrollo",
+        "valor": "aporta orden y trazabilidad al trabajo del equipo",
+    }
+
+
+def _grounded_theme(case: Dict, quotes: List[str], flow_summary: str = "") -> GroundedTheme:
+    """Guion PROFESIONAL para audiencia bancaria.
+
+    Regla dura: la transcripcion automatica NUNCA se lee en voz alta. El habla
+    espontanea de una reunion, transcrita, produce texto fragmentado ("el, el, el
+    costo...") que suena incoherente y no es presentable. La transcripcion se usa
+    solo como EVIDENCIA para elegir el tema y el tramo; la voz narra en lenguaje
+    claro y bien formado lo que efectivamente ocurre en pantalla."""
     topic = case["topic"]
-    parts = [f"Veamos este momento de la reunión, sobre {topic.lower()}.",
-            "A continuación, paso a paso, cómo se hace en pantalla."]
-    if case.get("intencion"):
-        parts.append(case["intencion"].strip())
-    if case.get("pregunta"):
-        parts.append("En ese momento surge esta pregunta:")
-        parts.append(case["pregunta"].strip())
-    if quotes:
-        parts.append("Así lo explica el equipo en la grabación, mientras se ve en pantalla:")
-        parts.extend(quotes)
-    parts.append(f"Ese fue, de principio a fin, el ejemplo que el equipo mostró y conversó "
-                f"sobre {topic.lower()} en esta sesión.")
-    script = " ".join(p for p in parts if p)
-    que_hace = case.get("intencion") or (quotes[0] if quotes else f"Momento real sobre {topic.lower()}.")
-    proposito = case.get("pregunta") or "(no explicito en el audio; revisar el tramo)"
-    resultado = quotes[-1] if quotes else "(revisar el tramo para el detalle del resultado)"
-    return GroundedTheme(slug=_slug_text(topic), title=topic,
-                         caption=f"{topic} · momento real de la reunión", script=script,
-                         que_hace=que_hace, proposito=proposito, resultado=resultado)
+    prof = _topic_profile(topic)
+    nombre = prof["nombre"]
+    intro = (f"En esta cápsula revisamos {nombre}. "
+             f"Durante la sesión, {prof['que']}. "
+             f"Veamos el procedimiento en pantalla, tal como fue ejecutado.")
+    cierre = ("El procedimiento queda documentado y puede repetirse cuando se necesite. "
+              f"Para la organización, {prof['valor']}.")
+    script = f"{intro} {cierre}"
+    return GroundedTheme(
+        slug=_slug_text(topic), title=topic,
+        caption=f"{topic} · procedimiento paso a paso", script=script,
+        que_hace=prof["que"], proposito=nombre, resultado=prof["valor"],
+        _intro=intro, _cierre=cierre)
 
 
 def grounded_use_cases(cases: List[Dict], tagged: List[Dict], cands, duration: float,
