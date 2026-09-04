@@ -66,6 +66,7 @@ PEOPLE_SKIN = 0.045
 # via variables de entorno CAPSULA_PRESENTADOR / CAPSULA_MARCA.
 PRESENTER = os.environ.get("CAPSULA_PRESENTADOR", "Bernardo Cornejo López")
 BRAND = os.environ.get("CAPSULA_MARCA", "Santander · NTT DATA")
+SERIE = os.environ.get("CAPSULA_SERIE", "Célula Agéntica")
 
 
 def _skin_frac(rgb: np.ndarray) -> float:
@@ -905,7 +906,7 @@ def write_discovery_report(path: Path, video: Path, date_string: str, duration: 
     """Base educativa: los casos de uso descubiertos y su explicación (qué/para qué/resultado)."""
     tag = date_tag(date_string)
     lines = [
-        f"# Discovery educativo - Celula Agentica {tag}",
+        f"# Discovery educativo - {video.stem} {tag}",
         "",
         f"- **Video de origen:** `{video.name}`",
         f"- **Duracion:** {fmt_ts(duration)}",
@@ -1061,9 +1062,9 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
     # Guion de la voz aterrizado en la memoria/objetivo del proyecto (sin inventar).
     theme_clean = re.sub(r"^\s*c[eé]lula\s+ag[eé]ntica\s*[·:\-–—]\s*", "",
                          ctx.theme or "", flags=re.I).strip()
-    hook_text = (f"Célula Agéntica. {theme_clean}."
+    hook_text = (f"{SERIE}. {theme_clean}."
                  if theme_clean else
-                 "Célula Agéntica. Así trabajamos con el Framework Agéntico.")
+                 f"{SERIE}. Así trabajamos en este proyecto.")
     pts = ctx.points or []
 
     def pt(i: int) -> str:
@@ -1186,7 +1187,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         cover_sub = (reel_theme.title if reel_theme is not None
                      else (theme_clean or getattr(args, "_label", "")
                            or "Framework Agéntico")) + part_tag
-        cover_title = "Cápsula Extensa\nCélula Agéntica" if is_reel else "Cápsula\nCélula Agéntica"
+        cover_title = f"Cápsula Extensa\n{SERIE}" if is_reel else f"Cápsula\n{SERIE}"
         items.append({"kind": "card", "title": cover_title,
                       "subtitle": cover_sub,
                       "footer": f"Realizado por {PRESENTER}",
@@ -1206,7 +1207,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
                           "base": s.dur})
     if cards:
         items.append({"kind": "card", "title": "La IA ejecuta.\nLas personas deciden.",
-                      "subtitle": "Célula Agéntica · Framework Agéntico",
+                      "subtitle": f"{SERIE} · Resultado real de la sesión",
                       "footer": BRAND, "badge": "", "accent": RED,
                       "title_size": 0.10, "base": outro_base, "narr": outro_narr})
 
@@ -1349,15 +1350,15 @@ def main() -> int:
 
     # Contexto real del video para narrar "como en el video" (sin inventar).
     # Etiqueta para distinguir varios videos del mismo dia (nombre de salida + subtitulo).
+    # Se deriva SIEMPRE del nombre real del archivo (venga de --video o de auto-deteccion
+    # por fecha), para que carpetas/discovery/portada queden trazables al video de origen.
     if args.label:
         label = args.label
-    elif args.video:
-        raw = re.sub(r"(?i)grabaci[oó]n", "", Path(args.video).stem)
-        label = re.sub(r"[-_.\s]+", " ", raw).strip()
     else:
-        label = ""
+        raw = re.sub(r"(?i)grabaci[oó]n", "", video.stem)
+        label = re.sub(r"[-_.\s]+", " ", raw).strip()
     args._label = label
-    slug = _slug(label) if label else "Celula-Agentica"
+    slug = _slug(label) if label else "Capsula"
 
     # Modo reel: log de AVANCE por VIDEO (el slug evita que se pisen en un lote).
     progress = ReelProgress(out_dir / f"_progreso-capsula-{slug}-{tag}.log", logger) if is_reel else None
@@ -1433,12 +1434,25 @@ def main() -> int:
         emit = progress.log if progress else logger.info
         # DISCOVERY PROFUNDO DEL AUDIO (transcripcion + intenciones + preguntas reales):
         # produce los entregables 01-04 como EVIDENCIA para curar los reels. Cacheado.
+        analysis = None
         if not getattr(args, "no_transcribe", False):
             if progress:
                 progress.phase("DISCOVERY DE AUDIO - transcripcion, intenciones y preguntas")
-            reel_discovery.deep_discovery(video, out_dir / "discovery" / slug, date_string,
-                                          duration, cands=cands, emit=emit)
-        use_cases = reel_themes.discover_use_cases(cands or [], duration, emit, only=only)
+            analysis = reel_discovery.deep_discovery(video, out_dir / "discovery" / slug, date_string,
+                                                     duration, cands=cands, emit=emit)
+        # Por defecto, el guion se ATERRIZA en lo que el audio REALMENTE dice (casos de
+        # uso reales por tema/tramo/cita literal), no en el catalogo fijo de "Framework
+        # Agentico" (pensado para el proyecto original y que puede no aplicar a otro
+        # proyecto). El catalogo fijo solo se usa si el usuario pide temas explicitos
+        # con --reels, o como ultimo recurso si el audio no arrojo casos reales.
+        use_cases: List[reel_themes.UseCase] = []
+        if only:
+            use_cases = reel_themes.discover_use_cases(cands or [], duration, emit, only=only)
+        elif analysis and analysis.get("cases"):
+            use_cases = reel_themes.grounded_use_cases(analysis["cases"], analysis.get("tagged", []),
+                                                       cands or [], duration, emit)
+        if not use_cases:
+            use_cases = reel_themes.discover_use_cases(cands or [], duration, emit, only=only)
         # Base educativa: reporte de discovery con la explicacion de cada caso de uso.
         write_discovery_report(out_dir / f"Discovery-{slug}-{tag}.md",
                                video, date_string, duration, use_cases)

@@ -20,8 +20,9 @@
 # ============================================================================
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
-from typing import List, Optional, Pattern, Callable
+from typing import Dict, List, Optional, Pattern, Callable
 
 
 def _rx(*patterns: str) -> List[Pattern]:
@@ -466,6 +467,115 @@ def themes_from_slugs(slugs: List[str]) -> List[ReelTheme]:
         if t and t not in out:
             out.append(t)
     return out
+
+
+# ----------------------------------------------------------------------------
+# Casos de uso GROUNDED: en vez de forzar el catalogo fijo de "Framework Agentico"
+# (EDUCATIONAL_REELS, pensado para el proyecto original), narran con el CONTENIDO
+# REAL del audio (reel_discovery.analyze: topico + tramo + citas literales de la
+# transcripcion). Es el modo por defecto para que el mismo motor sirva para
+# cualquier proyecto sin inventar contenido que el video no muestra.
+# ----------------------------------------------------------------------------
+
+def _slug_text(text: str) -> str:
+    t = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    t = re.sub(r"[^A-Za-z0-9]+", "-", t).strip("-")
+    return t or "Caso"
+
+
+@dataclass(eq=False)
+class GroundedTheme:
+    """Interfaz minima que build_capsule espera de un 'reel_theme' (title/caption/
+    script/act_caption), pero con contenido tomado del audio real (sin plantilla)."""
+    slug: str
+    title: str
+    caption: str
+    script: str
+    que_hace: str = ""
+    proposito: str = ""
+    resultado: str = ""
+
+    def act_caption(self, act: int) -> str:
+        act = max(0, min(2, act))
+        return f"{ACT_LABELS[act]} · {self.title}"
+
+
+def _case_quotes(case: Dict, tagged: List[Dict], max_quotes: int = 3) -> List[str]:
+    """Citas literales (las mas largas, sin repetir) dentro del tramo del caso."""
+    inside = [t["text"] for t in tagged
+             if case["start"] - 1 <= t["start"] <= case["end"] and len(t["text"].split()) >= 4]
+    seen, out = set(), []
+    for txt in sorted(inside, key=len, reverse=True):
+        if txt in seen:
+            continue
+        seen.add(txt)
+        out.append(txt.strip())
+        if len(out) >= max_quotes:
+            break
+    return out
+
+
+def _grounded_theme(case: Dict, quotes: List[str]) -> GroundedTheme:
+    """Guion HONESTO: contexto + intencion/pregunta reales + citas literales del
+    tramo. No fabrica proposito/resultado que el audio no explique."""
+    topic = case["topic"]
+    parts = [f"Veamos este momento de la reunión, sobre {topic.lower()}."]
+    if case.get("intencion"):
+        parts.append(case["intencion"].strip())
+    if case.get("pregunta"):
+        parts.append("En ese momento surge esta pregunta:")
+        parts.append(case["pregunta"].strip())
+    if quotes:
+        parts.append("Así lo explica el equipo en la grabación:")
+        parts.extend(quotes)
+    parts.append(f"Eso es lo que el equipo mostró y conversó sobre {topic.lower()} en esta sesión.")
+    script = " ".join(p for p in parts if p)
+    que_hace = case.get("intencion") or (quotes[0] if quotes else f"Momento real sobre {topic.lower()}.")
+    proposito = case.get("pregunta") or "(no explicito en el audio; revisar el tramo)"
+    resultado = quotes[-1] if quotes else "(revisar el tramo para el detalle del resultado)"
+    return GroundedTheme(slug=_slug_text(topic), title=topic,
+                         caption=f"{topic} · momento real de la reunión", script=script,
+                         que_hace=que_hace, proposito=proposito, resultado=resultado)
+
+
+def grounded_use_cases(cases: List[Dict], tagged: List[Dict], cands, duration: float,
+                       emit: Optional[Callable[[str], None]] = None, *,
+                       min_menciones: int = 2, per_case: int = 10,
+                       max_reels: int = 6) -> List[UseCase]:
+    """Casos de uso a partir del discovery de AUDIO real (reel_discovery.analyze),
+    no del catalogo fijo de capacidades. Es el modo por defecto: evita narrar un
+    tema que el video no muestra (p. ej. 'Framework Agéntico' sobre un video de
+    otro proyecto que no lo menciona)."""
+    def say(msg: str) -> None:
+        if emit is not None:
+            emit(msg)
+
+    cams = [c for c in cands if _has_people(c)]
+    clean = [c for c in cands if not _has_people(c)]
+    if cams:
+        say(f"Excluidos {len(cams)} momentos con personas (camara): solo pantalla compartida.")
+    pool = _screen_pool(clean) if clean else []
+
+    strong = [c for c in cases if c.get("menciones", 0) >= min_menciones]
+    strong.sort(key=lambda c: c["start"])
+
+    use_cases: List[UseCase] = []
+    for c in strong[:max_reels]:
+        lo, hi = c["start"], c["end"]
+        window = [k.ts for k in pool if lo - 5 <= k.ts <= hi + 5]
+        if not window:
+            window = [k.ts for k in clean if lo - 5 <= k.ts <= hi + 5]
+        if not window:
+            continue
+        marks = _even(sorted(window), min(per_case, len(window)))
+        theme = _grounded_theme(c, _case_quotes(c, tagged))
+        use_cases.append(UseCase(theme=theme, start=lo, end=hi, marks=marks))
+        say(f"Caso de uso GROUNDED: {theme.title} · {len(marks)} momentos · "
+            f"{int(lo)}s-{int(hi)}s ({c['menciones']} menciones)")
+
+    if use_cases:
+        say(f"Casos de uso reales (del audio): {len(use_cases)}.")
+    return use_cases
 
 
 def discover_use_cases(cands, duration: float,

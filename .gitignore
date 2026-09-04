@@ -11,3 +11,9 @@ capsula/*.m4v
 capsula/*.webm
 presentacion/ReporteVideo/**/*.mp4
 presentacion/ReporteVideo/**/_progreso-*.log
+# Salidas generadas por una corrida (transcripciones/discovery/rundowns de un
+# video concreto): son resultado del contenido de capsula/, no codigo fuente.
+presentacion/ReporteVideo/**/discovery/
+presentacion/ReporteVideo/**/Discovery-*.md
+presentacion/ReporteVideo/**/CapsulaExtensa-*.md
+presentacion/ReporteVideo/**/Capsula-*.md

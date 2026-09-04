@@ -4,6 +4,11 @@ Motor **standalone** del *agenteVideo* (extraído de [`ReporteCelulaAgentica`](.
 convierte grabaciones largas (demos, dailies, reuniones) en **cápsulas de video para
 gerencia** — sin mostrar personas, con voz IA y trazabilidad al minuto.
 
+Además incluye **`/videoE2EUseCaseAnalyzer`**: un agente que hace lo inverso — analiza
+un video de demo/proceso y lo convierte en documentación funcional trazable (actores,
+sistemas, funcionalidades, reglas de negocio, casos de uso), con memoria persistente
+anti-duplicación. Ver [`skills/video-e2e-analyzer/SKILL.md`](skills/video-e2e-analyzer/SKILL.md).
+
 ## Qué hace
 
 A partir de un video largo en `capsula/`, produce automáticamente:
@@ -40,6 +45,10 @@ scripts/
   capsule_registry.py   # registro + bucle "¿hay más casos?" (anti-duplicación)
   capsule_verify.py     # compuerta de verificación (duración, resolución, códecs, sin personas)
   narration.py          # voz en off (edge-tts, con respaldo local pyttsx3)
+  video_use_case_memory.py  # memoria JSON anti-duplicación del /videoE2EUseCaseAnalyzer
+memory/               # video_use_case_memory.json (videos, actores, casos de uso, historial)
+skills/video-e2e-analyzer/  # SKILL del analizador de casos de uso E2E
+.github/prompts/videoE2EUseCaseAnalyzer.prompt.md  # prompt del analizador E2E
   utils.py              # rutas del proyecto, logging, utilidades de fecha
 skills/agente-video/    # SKILL + guiones de ejemplo del proyecto original
 .github/prompts/agenteVideo.prompt.md  # prompt de Copilot para invocar /agenteVideo
