@@ -592,7 +592,7 @@ def build_video(renderer: CapsuleRenderer, narrator: Optional[Narrator],
                       "base": item_seconds(4.0, valor), "narr": valor})
 
     items.append({"kind": "card", "title": "La IA ejecuta.\nLas personas deciden.",
-                  "subtitle": "Célula Agéntica · Framework Agéntico",
+                  "subtitle": f"{p.subtitulo} · Resultado real de la sesión",
                   "footer": BRAND, "badge": "", "accent": RED,
                   "title_size": 0.10, "base": 4.0, "narr": None})
 
@@ -676,7 +676,7 @@ def run(args, paths: ProjectPaths, logger: Logger, date_string: str) -> int:
 
     if is_infografia:
         product = _infografia_product(nombre)
-        vid_name = f"CapsulaExtensa-{product.slug}-{tag}.mp4"
+        vid_name = f"Capsula-{product.slug}-{tag}.mp4"
         out_video = video_dir / vid_name
         write_discovery(disc_dir, story_dir, product, html_path, tag, vid_name)
         progress.log(f"Discovery + storytelling escritos ({len(product.casos_uso)} casos de uso).")
@@ -715,7 +715,7 @@ def run(args, paths: ProjectPaths, logger: Logger, date_string: str) -> int:
         wav = narrator.synthesize(script, narr_dir / "guion")
         narr = decode_audio_file(wav) if wav else None
     slug = _slug(html_path.stem)
-    out_video = video_dir / f"CapsulaExtensa-{slug}-{tag}.mp4"
+    out_video = video_dir / f"Capsula-{slug}-{tag}.mp4"
     items = [
         {"kind": "card", "title": COVER_TITLE,
          "subtitle": nombre, "footer": f"Realizado por {PRESENTER}",
@@ -724,7 +724,7 @@ def run(args, paths: ProjectPaths, logger: Logger, date_string: str) -> int:
         {"kind": "image", "image": png, "caption": html_path.stem,
          "base": item_seconds(6.0, narr), "narr": narr},
         {"kind": "card", "title": "La IA ejecuta.\nLas personas deciden.",
-         "subtitle": "Célula Agéntica · Framework Agéntico",
+         "subtitle": f"{nombre} · Resultado real de la sesión",
          "footer": BRAND, "badge": "", "accent": RED,
          "title_size": 0.10, "base": 4.0, "narr": None},
     ]

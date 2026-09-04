@@ -82,11 +82,14 @@ def save_registry(reg: Dict) -> None:
 def _sync_from_outputs(reg: Dict) -> Dict:
     """Reconcilia el registro con los .mp4 realmente presentes (auto-descubrimiento)."""
     known = {c.get("output") for c in reg["capsulas"]}
-    for mp4 in sorted(CAPS_DIR.glob("CapsulaExtensa-*.mp4")):
+    # 'Capsula-' es el nombre vigente; 'CapsulaExtensa-' se mantiene por compatibilidad
+    # con capsulas generadas antes del renombre (mismo archivo, sin duplicar).
+    for mp4 in sorted(set(CAPS_DIR.glob("Capsula-*.mp4")) | set(CAPS_DIR.glob("CapsulaExtensa-*.mp4"))):
         if mp4.name in known:
             continue
-        # nombre: CapsulaExtensa-<VideoSlug>-<TopicSlug>-<fecha>.mp4
-        stem = mp4.stem[len("CapsulaExtensa-"):]
+        # nombre: Capsula-<VideoSlug>-<TopicSlug>-<fecha>.mp4 (o el prefijo legado CapsulaExtensa-)
+        pfx = "CapsulaExtensa-" if mp4.stem.startswith("CapsulaExtensa-") else "Capsula-"
+        stem = mp4.stem[len(pfx):]
         stem = re.sub(r"-\d{2}-\d{2}-\d{4}$", "", stem)
         topic = canon_of(stem) or "(sin clasificar)"
         reg["capsulas"].append({
@@ -244,8 +247,10 @@ def more_cases() -> int:
 # PREGUNTA si eliminar el mp4; el registro conserva que se proceso y su objetivo.
 # ---------------------------------------------------------------------------
 def _cap_stem_tokens(output: str) -> set:
-    stem = output[len("CapsulaExtensa-"):] if output.startswith("CapsulaExtensa-") else output
-    return _toks(re.sub(r"-\d{2}-\d{2}-\d{4}$", "", stem))
+    for pfx in ("Capsula-", "CapsulaExtensa-"):
+        if output.startswith(pfx):
+            return _toks(re.sub(r"-\d{2}-\d{2}-\d{4}$", "", output[len(pfx):]))
+    return _toks(re.sub(r"-\d{2}-\d{2}-\d{4}$", "", output))
 
 
 def _caps_for_video(src_stem: str, reg: Dict, all_stems: List[str]) -> List[str]:

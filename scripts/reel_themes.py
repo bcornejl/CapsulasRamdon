@@ -35,7 +35,7 @@ ACT_LABELS = ["¿Qué hace?", "¿Para qué sirve?", "¿Cuál es el resultado?"]
 
 CIERRE = ("En resumen: el Framework Agéntico no reemplaza a las personas, amplifica lo "
           "que saben hacer. La inteligencia artificial ejecuta; las personas deciden. "
-          "Gracias por acompañarme en esta Cápsula Extensa de la Célula Agéntica.")
+          "Gracias por acompañarme en esta Cápsula.")
 
 
 @dataclass(eq=False)
@@ -65,7 +65,7 @@ class ReelTheme:
         explicado a prueba de ninos."""
         preg = self.pregunta or f"¿Cómo funciona {self.title.lower()} y qué gano con esto?"
         parts = [
-            "Cápsula Extensa. Célula Agéntica.",
+            "Cápsula.",
             self.hook,
             "Veamos primero el contexto.", self.que_hace,
             "La pregunta que suele surgir es esta:", preg,
@@ -500,7 +500,7 @@ class GroundedTheme:
         return f"{ACT_LABELS[act]} · {self.title}"
 
 
-def _case_quotes(case: Dict, tagged: List[Dict], max_quotes: int = 3) -> List[str]:
+def _case_quotes(case: Dict, tagged: List[Dict], max_quotes: int = 6) -> List[str]:
     """Citas literales (las mas largas, sin repetir) dentro del tramo del caso."""
     inside = [t["text"] for t in tagged
              if case["start"] - 1 <= t["start"] <= case["end"] and len(t["text"].split()) >= 4]
@@ -519,16 +519,18 @@ def _grounded_theme(case: Dict, quotes: List[str]) -> GroundedTheme:
     """Guion HONESTO: contexto + intencion/pregunta reales + citas literales del
     tramo. No fabrica proposito/resultado que el audio no explique."""
     topic = case["topic"]
-    parts = [f"Veamos este momento de la reunión, sobre {topic.lower()}."]
+    parts = [f"Veamos este momento de la reunión, sobre {topic.lower()}.",
+            "A continuación, paso a paso, cómo se hace en pantalla."]
     if case.get("intencion"):
         parts.append(case["intencion"].strip())
     if case.get("pregunta"):
         parts.append("En ese momento surge esta pregunta:")
         parts.append(case["pregunta"].strip())
     if quotes:
-        parts.append("Así lo explica el equipo en la grabación:")
+        parts.append("Así lo explica el equipo en la grabación, mientras se ve en pantalla:")
         parts.extend(quotes)
-    parts.append(f"Eso es lo que el equipo mostró y conversó sobre {topic.lower()} en esta sesión.")
+    parts.append(f"Ese fue, de principio a fin, el ejemplo que el equipo mostró y conversó "
+                f"sobre {topic.lower()} en esta sesión.")
     script = " ".join(p for p in parts if p)
     que_hace = case.get("intencion") or (quotes[0] if quotes else f"Momento real sobre {topic.lower()}.")
     proposito = case.get("pregunta") or "(no explicito en el audio; revisar el tramo)"
@@ -540,7 +542,7 @@ def _grounded_theme(case: Dict, quotes: List[str]) -> GroundedTheme:
 
 def grounded_use_cases(cases: List[Dict], tagged: List[Dict], cands, duration: float,
                        emit: Optional[Callable[[str], None]] = None, *,
-                       min_menciones: int = 2, per_case: int = 10,
+                       min_menciones: int = 2, per_case: int = 18,
                        max_reels: int = 6) -> List[UseCase]:
     """Casos de uso a partir del discovery de AUDIO real (reel_discovery.analyze),
     no del catalogo fijo de capacidades. Es el modo por defecto: evita narrar un

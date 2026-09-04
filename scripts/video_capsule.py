@@ -64,10 +64,11 @@ MUTE = (176, 190, 214)
 PEOPLE_SKIN = 0.045
 
 # Presentador y marca de las cápsulas: configurables por proyecto (sin tocar código)
-# via variables de entorno CAPSULA_PRESENTADOR / CAPSULA_MARCA.
+# via variables de entorno CAPSULA_PRESENTADOR / CAPSULA_MARCA. La portada/cierre ya NO
+# usan un nombre de serie fijo ("Célula Agéntica"): muestran el nombre real del video
+# de origen (motivo/nombre de creación), ver `video_label` en build_capsule().
 PRESENTER = os.environ.get("CAPSULA_PRESENTADOR", "Bernardo Cornejo López")
 BRAND = os.environ.get("CAPSULA_MARCA", "Santander · NTT DATA")
-SERIE = os.environ.get("CAPSULA_SERIE", "Célula Agéntica")
 
 
 def _skin_frac(rgb: np.ndarray) -> float:
@@ -849,8 +850,8 @@ def write_rundown(path: Path, video: Path, date_string: str, duration: float,
                   with_cards: bool = True, voice: Optional[str] = None,
                   theme: Optional[str] = None) -> None:
     tag = date_tag(date_string)
-    head = f"# Capsula Extensa educativa - Celula Agentica ({theme}) {tag}" if theme else \
-           f"# Capsula ejecutiva - Celula Agentica {tag}"
+    head = f"# Capsula educativa - {video.stem} ({theme}) {tag}" if theme else \
+           f"# Capsula ejecutiva - {video.stem} {tag}"
     lines = [
         head,
         "",
@@ -911,10 +912,10 @@ def write_discovery_report(path: Path, video: Path, date_string: str, duration: 
         "",
         f"- **Video de origen:** `{video.name}`",
         f"- **Duracion:** {fmt_ts(duration)}",
-        f"- **Capsulas Extensas educativas:** {len(use_cases)} (division dinamica por contenido)",
+        f"- **Capsulas educativas:** {len(use_cases)} (division dinamica por contenido)",
         f"- **Generado:** {datetime.now():%Y-%m-%d %H:%M:%S}",
         "",
-        "> La Capsula Extensa lee el video completo (discovery) y lo desfragmenta en casos de "
+        "> La Capsula lee el video completo (discovery) y lo desfragmenta en casos de "
         "uso educativos a prueba de principiantes. Cada capsula explica una capacidad con la "
         "estructura de la educacion: que hace, para que sirve y cual es el resultado.",
         "",
@@ -926,7 +927,7 @@ def write_discovery_report(path: Path, video: Path, date_string: str, duration: 
             "",
             f"- **Tramo en el video:** {fmt_ts(uc.start)}–{fmt_ts(uc.end)} · "
             f"{len(uc.marks)} momentos",
-            f"- **Archivo:** `CapsulaExtensa-…-{t.slug}-{tag}.mp4`",
+            f"- **Archivo:** `Capsula-…-{t.slug}-{tag}.mp4`",
             "",
             f"**¿Qué hace?** {t.que_hace}",
             "",
@@ -1063,9 +1064,10 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
     # Guion de la voz aterrizado en la memoria/objetivo del proyecto (sin inventar).
     theme_clean = re.sub(r"^\s*c[eé]lula\s+ag[eé]ntica\s*[·:\-–—]\s*", "",
                          ctx.theme or "", flags=re.I).strip()
-    hook_text = (f"{SERIE}. {theme_clean}."
+    video_label = getattr(args, "_label", "") or video.stem
+    hook_text = (f"{video_label}. {theme_clean}."
                  if theme_clean else
-                 f"{SERIE}. Así trabajamos en este proyecto.")
+                 f"{video_label}. Así trabajamos en este proyecto.")
     pts = ctx.points or []
 
     def pt(i: int) -> str:
@@ -1123,9 +1125,15 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         base_marks = list(marks if ordered else sorted(marks))
         if voice_only and full_narr is not None and base_marks:
             narr_s = full_narr.shape[1] / renderer.rate
-            total_clip_time = max(narr_s + 1.0 - card_time, len(base_marks) * 4.0)
-            n_slots = min(60, max(len(base_marks), int(round(total_clip_time / 12.0))))
-            clip_len = max(6.0, min(18.0, total_clip_time / n_slots))
+            # Profundidad: cada momento debe alcanzar para ver la ACCION COMPLETA en
+            # pantalla (p.ej. crear un componente de principio a fin), no cortarla a
+            # los pocos segundos. Piso de ~22s por momento; tope duro = args.max_seconds
+            # (5 min como maximo del modo capsula).
+            per_mark_depth = 22.0
+            total_clip_time = max(narr_s + 1.0 - card_time, len(base_marks) * per_mark_depth)
+            total_clip_time = min(total_clip_time, max(1.0, args.max_seconds - card_time))
+            n_slots = min(30, max(len(base_marks), int(round(total_clip_time / 25.0))))
+            clip_len = max(15.0, min(45.0, total_clip_time / n_slots))
             marks_seq = [base_marks[i % len(base_marks)] + (i // len(base_marks)) * clip_len
                          for i in range(n_slots)]
         else:
@@ -1188,7 +1196,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         cover_sub = (reel_theme.title if reel_theme is not None
                      else (theme_clean or getattr(args, "_label", "")
                            or "Framework Agéntico")) + part_tag
-        cover_title = f"Cápsula Extensa\n{SERIE}" if is_reel else f"Cápsula\n{SERIE}"
+        cover_title = f"Cápsula\n{video_label}"
         items.append({"kind": "card", "title": cover_title,
                       "subtitle": cover_sub,
                       "footer": f"Realizado por {PRESENTER}",
@@ -1208,7 +1216,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
                           "base": s.dur})
     if cards:
         items.append({"kind": "card", "title": "La IA ejecuta.\nLas personas deciden.",
-                      "subtitle": f"{SERIE} · Resultado real de la sesión",
+                      "subtitle": f"{video_label} · Resultado real de la sesión",
                       "footer": BRAND, "badge": "", "accent": RED,
                       "title_size": 0.10, "base": outro_base, "narr": outro_narr})
 
@@ -1222,14 +1230,14 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="agenteVideo: Capsula Extensa educativa (<=5 min, varias por video) con "
+        description="agenteVideo: Capsula educativa (<=5 min, varias por video) con "
                     "voz masculina IA (Bernardo Cornejo Lopez), solo pantalla, sin personas.")
     ap.add_argument("--video", type=str, help="Ruta del video (auto por fecha si se omite)")
     ap.add_argument("--date", type=str, help="Fecha 'hoy'/DD-MM-AAAA/AAAA-MM-DD (default: hoy)")
     ap.add_argument("--mode", choices=["screenshot", "capsula", "reel", "html"], default="screenshot",
                     help="screenshot: imagenes fijas de momentos clave; "
-                         "capsula: Capsula Extensa (tramas de video cortadas y unidas, <=5 min, "
-                         "audio 100%% voz IA, portada 'Capsula Extensa'). 'reel' = alias de capsula. "
+                         "capsula: Capsula (tramas de video cortadas y unidas, <=5 min, "
+                         "audio 100%% voz IA, portada 'Capsula'). 'reel' = alias de capsula. "
                          "html: 'Html a video' (renderiza un HTML/diagrama a un video didactico).")
     ap.add_argument("--html", type=str,
                     help="(modo html) ruta del HTML a explicar (default: el diagrama del "
@@ -1293,7 +1301,7 @@ def main() -> int:
     tag = date_tag(date_string)
 
     # Modo 3 (Html a video): rama propia. Renderiza un HTML (por defecto el diagrama
-    # del ciclo agentico) a un video estilo Capsula Extensa, con voz IA masculina y
+    # del ciclo agentico) a un video estilo Capsula, con voz IA masculina y
     # sin video de origen. Salida en la carpeta 'Html-a-video/'.
     if args.mode == "html":
         import html_to_video
@@ -1302,7 +1310,7 @@ def main() -> int:
     if args.mode == "reel":            # alias historico de 'capsula'
         args.mode = "capsula"
     is_reel = (args.mode == "capsula")
-    logger.section(f"agenteVideo - {'Capsula Extensa' if is_reel else 'Screenshot'} {tag}")
+    logger.section(f"agenteVideo - {'Capsula' if is_reel else 'Screenshot'} {tag}")
     if getattr(args, "script_file", None):
         try:
             args.script = Path(args.script_file).read_text(encoding="utf-8").strip()
@@ -1316,6 +1324,14 @@ def main() -> int:
     if is_reel:
         args.still = False
         args.mute_original = True
+        # Profundidad: por defecto (si el usuario no fijo min/max-seconds) el modo
+        # capsula apunta a una duracion mayor, para que la accion completa en pantalla
+        # (p.ej. crear un componente de principio a fin) alcance a verse, no solo un
+        # fragmento de segundos. Tope duro: 5 minutos.
+        if args.min_seconds == 60.0:
+            args.min_seconds = 120.0
+        if args.max_seconds == 95.0:
+            args.max_seconds = 280.0
         if args.max_seconds > 300:
             args.max_seconds = 300.0
         # Voz MASCULINA por defecto (presentador Bernardo Cornejo Lopez), salvo override.
@@ -1490,10 +1506,10 @@ def main() -> int:
         for uc in use_cases:
             jobs.append({"lo": 0.0, "hi": duration, "marks": uc.marks,
                          "theme": uc.theme,
-                         "out": out_dir / f"CapsulaExtensa-{vid_slug}{uc.theme.slug}-{tag}.mp4",
+                         "out": out_dir / f"Capsula-{vid_slug}{uc.theme.slug}-{tag}.mp4",
                          "label": uc.theme.title})
     if not jobs:
-        prefix = "CapsulaExtensa" if is_reel else "Capsula"
+        prefix = "Capsula"
         n_ch = len(chapters)
         for idx, (lo, hi) in enumerate(chapters, start=1):
             if n_ch > 1:

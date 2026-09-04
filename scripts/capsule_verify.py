@@ -94,7 +94,8 @@ def verify_one(p: Path) -> Tuple[str, dict, List[str]]:
 
 
 def main(argv: List[str]) -> int:
-    files = [Path(a) for a in argv] if argv else sorted(CAPS_DIR.glob("CapsulaExtensa-*.mp4"))
+    files = [Path(a) for a in argv] if argv else sorted(
+        set(CAPS_DIR.glob("Capsula-*.mp4")) | set(CAPS_DIR.glob("CapsulaExtensa-*.mp4")))
     if not files:
         print("No hay capsulas para verificar.")
         return 0
