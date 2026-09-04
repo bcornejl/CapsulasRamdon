@@ -41,6 +41,7 @@ import capsule_content
 import reel_themes
 import reel_discovery
 import capsule_registry
+import flow_steps
 
 # Windows suele mostrar cp1252 por consola; forzar UTF-8 evita romper con acentos.
 try:
@@ -1048,6 +1049,93 @@ def _chapters(duration: float, k: int) -> List[Tuple[float, float]]:
     return [(i * step, (i + 1) * step if i < k - 1 else duration) for i in range(k)]
 
 
+def _pick_steps(pool: List, cupo: int) -> List:
+    """Elige `cupo` pasos priorizando INTERACCION real, sin perder el arco E2E.
+
+    Reparte el video en `cupo` ventanas iguales y toma de cada una el paso con mas
+    actividad (digitacion/clics) y mas contenido: asi la capsula recorre la demo de
+    principio a fin y, dentro de cada tramo, muestra donde REALMENTE pasa algo."""
+    if cupo >= len(pool):
+        return pool
+    t0, t1 = pool[0].start, pool[-1].end
+    span = max(1e-6, t1 - t0)
+    ARTIFACT_BONUS = {"browser": 1.0, "code": 1.0, "jira_planner": 0.8,
+                      "excel": 0.8, "word": 0.4, "powerpoint": 0.4, "otro": 0.2}
+    elegidos, usados = [], set()
+    for i in range(cupo):
+        a, b = t0 + span * i / cupo, t0 + span * (i + 1) / cupo
+        ventana = [s for s in pool if a <= s.start < b and id(s) not in usados]
+        if not ventana:
+            continue
+        mejor = max(ventana, key=lambda s: (s.activity * 3.0
+                                            + ARTIFACT_BONUS.get(s.artifact, 0.2)
+                                            + min(s.dur, 30.0) / 60.0))
+        usados.add(id(mejor))
+        elegidos.append(mejor)
+    # Si alguna ventana quedo vacia, completar con los de mayor actividad restantes.
+    if len(elegidos) < cupo:
+        resto = sorted((s for s in pool if id(s) not in usados),
+                       key=lambda s: -s.activity)[:cupo - len(elegidos)]
+        elegidos.extend(resto)
+    return sorted(elegidos, key=lambda s: s.start)
+
+
+def _step_caption(step, reel_theme=None, max_len: int = 64) -> str:
+    """Subtitulo del clip para una capsula de aprendizaje: PASO concreto en pantalla
+    (`Paso N · Opción · acción`), no una etiqueta generica."""
+    partes = [f"Paso {step.index}"]
+    if step.screen:
+        partes.append(step.screen)
+    etiqueta = {
+        "filtrar": "aplicar filtros", "catalogo": "revisar el catálogo",
+        "formulario": "completar el formulario", "crear": "crear el elemento",
+        "desplegar": "desplegar", "configurar": "configurar",
+        "documentar": "revisar documentación", "validar": "validar el resultado",
+        "codigo": "revisar el código", "navegar": "navegar a la sección",
+        "escribir": "ingresar los datos", "cambiar": "cambiar de pantalla",
+        "interactuar": "recorrer y seleccionar", "revisar": "revisar la pantalla",
+    }.get(step.action, step.action or "")
+    if etiqueta:
+        partes.append(etiqueta)
+    txt = " · ".join(p for p in partes if p)
+    if len(txt) > max_len:
+        txt = txt[:max_len - 1].rstrip(" ·") + "…"
+    return txt or (reel_theme.caption if reel_theme is not None
+                   else ARTIFACT_CAPTION["otro"])
+
+
+def _walkthrough_script(flow, lo: float, hi: float, max_steps: int = 14) -> str:
+    """Narracion PASO A PASO de la demo: que se hace en cada pantalla, en orden.
+
+    Es lo que convierte la capsula en material de aprendizaje: describe la opcion
+    usada y la accion aunque en el video nadie hable. Evita repetir la misma frase
+    dos veces seguidas (pasos consecutivos con la misma pantalla y accion)."""
+    if not flow:
+        return ""
+    steps = flow_steps.steps_in_range(flow, lo, hi, min_dur=2.0)
+    if not steps:
+        return ""
+    if len(steps) > max_steps:                     # reparto parejo, sin perder el arco
+        k = len(steps) / float(max_steps)
+        steps = [steps[min(len(steps) - 1, int(i * k))] for i in range(max_steps)]
+    frases, prev = [], None
+    for st in steps:
+        key = (st.screen, st.action)
+        if key == prev:
+            continue
+        prev = key
+        frases.append(st.narration())
+    if not frases:
+        return ""
+    ordinales = ["Primero,", "Luego,", "Después,", "A continuación,", "Enseguida,",
+                 "Más adelante,", "Después de eso,", "Acto seguido,"]
+    salida = []
+    for i, f in enumerate(frases):
+        pref = ordinales[i] if i < len(ordinales) else "Y luego,"
+        salida.append(f"{pref} {f[0].lower()}{f[1:]}")
+    return " ".join(salida)
+
+
 def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: HighlightSelector,
                   narrator: Optional[Narrator], video: Path, ctx, date_string: str,
                   lo: float, hi: float, cands: Optional[List[Candidate]],
@@ -1060,6 +1148,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
     original se reemplaza por completo con la voz IA.
     """
     tag = date_tag(date_string)
+    args._seg_steps = None            # los pasos son por capsula: no arrastrar el lote anterior
 
     # Guion de la voz aterrizado en la memoria/objetivo del proyecto (sin inventar).
     theme_clean = re.sub(r"^\s*c[eé]lula\s+ag[eé]ntica\s*[·:\-–—]\s*", "",
@@ -1094,6 +1183,11 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
             script_text = reel_theme.script
         if not script_text:
             script_text = " ".join(p for p in (hook_text, pt(0), pt(1), pt(2), outro_text) if p)
+        # PASO A PASO NARRADO: la capsula es de APRENDIZAJE, asi que la voz IA describe
+        # cada paso real de la demo (opcion usada + accion), incluso donde nadie habla.
+        walk = _walkthrough_script(getattr(args, "_flow_steps", None), lo, hi)
+        if walk:
+            script_text = f"{script_text} Veámoslo paso a paso. {walk}"
         full_narr = synth(script_text, "script")
         if full_narr is not None:
             pk = float(np.max(np.abs(full_narr))) or 1.0
@@ -1121,26 +1215,50 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
     # se muestran MUCHOS momentos de pantalla y, si el tema tiene pocos, se AVANZA
     # dentro del screen-share (no se congela ni se repite igual) para cubrir la voz.
     ordered = bool(getattr(args, "ordered", False)) and marks is not None
-    if marks is not None:
-        base_marks = list(marks if ordered else sorted(marks))
-        if voice_only and full_narr is not None and base_marks:
-            narr_s = full_narr.shape[1] / renderer.rate
-            # Profundidad: cada momento debe alcanzar para ver la ACCION COMPLETA en
-            # pantalla (p.ej. crear un componente de principio a fin), no cortarla a
-            # los pocos segundos. Piso de ~22s por momento; tope duro = args.max_seconds
-            # (5 min como maximo del modo capsula).
-            per_mark_depth = 22.0
-            total_clip_time = max(narr_s + 1.0 - card_time, len(base_marks) * per_mark_depth)
-            total_clip_time = min(total_clip_time, max(1.0, args.max_seconds - card_time))
-            n_slots = min(30, max(len(base_marks), int(round(total_clip_time / 25.0))))
-            clip_len = max(15.0, min(45.0, total_clip_time / n_slots))
-            marks_seq = [base_marks[i % len(base_marks)] + (i // len(base_marks)) * clip_len
-                         for i in range(n_slots)]
-        else:
-            clip_len = args.clip_seconds
-            marks_seq = base_marks
+    flow = getattr(args, "_flow_steps", None)
+    if voice_only and full_narr is not None and flow:
+        # PASO A PASO REAL (capsula de aprendizaje): en vez de repetir marcas con
+        # desplazamiento (lo que producia un BUCLE visual y tramos solapados), se
+        # recorren los PASOS detectados del flujo E2E en ORDEN cronologico y SIN
+        # solaparse. Cada paso se muestra completo (hasta que la pantalla cambia),
+        # y los tramos de espera ya vienen descartados por flow_steps.
+        narr_s = full_narr.shape[1] / renderer.rate
+        budget_s = min(max(narr_s + 1.0 - card_time, 30.0),
+                       max(1.0, args.max_seconds - card_time))
+        pool = flow_steps.steps_in_range(flow, lo, hi, min_dur=1.5)
+        if not pool:                       # el tema no cae sobre pasos utiles: usa todo
+            pool = flow_steps.steps_in_range(flow, 0.0, 1e9, min_dur=1.5)
+        # DETALLE ANTES QUE CANTIDAD: para APRENDER hay que ver la accion completa
+        # (la digitacion, el filtro aplicandose), no un flash de 4 segundos. Se elige
+        # cuantos pasos caben con `--step-seconds` de duracion util y se PRIORIZAN los
+        # de interaccion real (activity), conservando la cobertura E2E del video.
+        per = max(6.0, float(getattr(args, "step_seconds", 14.0)))
+        cupo = max(3, int(budget_s // per))
+        if len(pool) > cupo:
+            pool = _pick_steps(pool, cupo)
         segs: List[Segment] = []
-        for m in marks_seq:
+        if pool:
+            acc = 0.0
+            for st in pool:
+                if acc >= budget_s:
+                    break
+                take = min(per, budget_s - acc)
+                if take < 3.0:
+                    break
+                a = max(lo, st.start)
+                b = min(hi, a + take)
+                if b - a < 3.0:
+                    continue
+                segs.append(Segment(a, b, st.artifact,
+                                    _step_caption(st, reel_theme), 0.0))
+                acc += (b - a)
+            # Guardar el paso de cada clip: la voz puede narrarlo si nadie habla.
+            args._seg_steps = pool[:len(segs)]
+    elif marks is not None:
+        base_marks = list(marks if ordered else sorted(marks))
+        clip_len = args.clip_seconds
+        segs = []
+        for m in base_marks:
             st = max(lo, min(m, hi - clip_len))
             segs.append(Segment(st, min(hi, st + clip_len), "otro",
                                 ARTIFACT_CAPTION["otro"], 0.0))
@@ -1165,7 +1283,10 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         return None
 
     # En un reel educativo el subtitulo de cada clip refuerza el tema (didactico).
-    if reel_theme is not None:
+    # Excepcion: si los clips vienen del flujo paso a paso, su subtitulo YA describe
+    # el paso concreto (Paso N · Opcion · accion) y es mas util para aprender.
+    step_captions = bool(getattr(args, "_seg_steps", None))
+    if reel_theme is not None and not step_captions:
         for s in segs:
             s.caption = reel_theme.caption
 
@@ -1209,7 +1330,7 @@ def build_capsule(logger: Logger, renderer: "CapsuleRenderer", selector: Highlig
         if not groups[gi]:
             continue
         for j, s in enumerate(groups[gi]):
-            if reel_theme is not None:
+            if reel_theme is not None and not step_captions:
                 s.caption = reel_theme.act_caption(gi)   # ¿qué hace?/propósito/resultado
             items.append({"kind": "clip", "seg": s,
                           "narr": sec_narr[gi] if (j == 0 and cards) else None,
@@ -1293,6 +1414,15 @@ def main() -> int:
     ap.add_argument("--force", "--reprocess", dest="force", action="store_true",
                     help="(modo capsula) reprocesa aunque el video ya este EXACT_DUPLICATE en memoria "
                          "(identidad por SHA-256, ver capsule_registry.identify_video)")
+    ap.add_argument("--flow-step", type=float, default=1.5,
+                    help="(modo capsula) muestreo del flujo E2E paso a paso en segundos "
+                         "(mas bajo = mas detalle y mas lento; default 1.5)")
+    ap.add_argument("--no-flow", action="store_true",
+                    help="(modo capsula) omite el analisis paso a paso del flujo E2E "
+                         "(mas rapido, pero pierde el detalle de cada pantalla)")
+    ap.add_argument("--step-seconds", type=float, default=14.0,
+                    help="(modo capsula) segundos EN PANTALLA por paso: hay que ver la "
+                         "accion completa (digitar, filtrar), no un flash (default 14)")
     args = ap.parse_args()
 
     paths = ProjectPaths()
@@ -1476,6 +1606,18 @@ def main() -> int:
             if not only:
                 logger.warning("Ningun slug de --reels es valido; uso seleccion automatica.")
         emit = progress.log if progress else logger.info
+        # FLUJO E2E PASO A PASO: escaneo denso de TODO el video -> cada estado de
+        # pantalla es un paso (con su artefacto, opcion y accion), las esperas se
+        # descartan y todo queda persistido (JSON + MD + captura por paso). Es lo que
+        # permite una capsula de APRENDIZAJE con detalle, sin bucles ni saltos.
+        if not getattr(args, "no_flow", False):
+            if progress:
+                progress.phase("FLUJO E2E - paso a paso de la demo (capturas por paso)")
+            flow = flow_steps.analyze_flow(
+                video, out_dir / "discovery" / slug, logger=logger, emit=emit,
+                step_seconds=args.flow_step, use_ocr=not args.no_ocr)
+            flow_steps.write_flow(flow, out_dir / "discovery" / slug, video, slug, date_string)
+            args._flow_steps = flow
         # DISCOVERY PROFUNDO DEL AUDIO (transcripcion + intenciones + preguntas reales):
         # produce los entregables 01-04 como EVIDENCIA para curar los reels. Cacheado.
         analysis = None
